@@ -1,0 +1,6 @@
+.env
+venv
+
+# Кэш Python
+__pycache__/
+*.pyc

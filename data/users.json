@@ -1,0 +1,8 @@
+{
+  "user1": {
+    "completed_tasks": [
+      "task1"
+    ],
+    "current_node": "task2"
+  }
+}

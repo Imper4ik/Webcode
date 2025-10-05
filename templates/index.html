@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Учебные задания</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Учебные задания</h1>
+    <p class="muted">Выбирай задачу, пиши код и проверяй тестами. Подсказка не раскрывает решение.</p>
+  </header>
+
+  <main>
+    <section class="grid">
+      <div>
+        <h2>Темы и статус</h2>
+        <div id="nodes" class="stack"></div>
+      </div>
+      <div>
+        <h2>Редактор</h2>
+        <label>Задача:
+          <select id="taskSelect"></select>
+        </label>
+        <pre id="taskDesc" class="desc"></pre>
+        <textarea id="code" placeholder="Вставь или правь стартовый код"></textarea>
+        <div class="row">
+          <button id="run">Запустить тесты</button>
+          <button id="hint">Подсказка</button>
+        </div>
+        <pre id="output" class="log"></pre>
+      </div>
+    </section>
+  </main>
+
+<script>
+function statusIcon(s){return s==='completed'?'✅':(s==='unlocked'?'🟡':'🔒')}
+
+async function fetchGraph(){
+  const r = await fetch('/api/knowledge-web');
+  if(!r.ok) throw new Error('network');
+  return r.json();
+}
+async function fetchTask(t){
+  const r = await fetch('/api/task/'+encodeURIComponent(t));
+  if(!r.ok) throw new Error('unknown task');
+  return r.json();
+}
+
+let currentTask = null;
+
+/** Рендерим список тем/задач. Не трогаем #output! */
+async function render(){
+  const g = await fetchGraph();
+  const nodes = document.getElementById('nodes');
+  const select = document.getElementById('taskSelect');
+  nodes.innerHTML = '';
+  select.innerHTML = '';
+
+  g.nodes.forEach(n=>{
+    const d = n.data; const box = document.createElement('div');
+    box.className = 'node ' + (d.status==='locked'?'locked':'');
+    box.innerHTML = `<div class="title">${statusIcon(d.status)} <strong>${d.label}</strong></div>
+                     <div class="tasks">Задачи: ${d.tasks.length? d.tasks.join(', ') : '—'}</div>`;
+    nodes.appendChild(box);
+    if(d.status!=='locked'){
+      d.tasks.forEach(t=>{
+        const o=document.createElement('option'); o.value=t; o.textContent=t + (g.completed.includes(t)?' (done)':'');
+        select.appendChild(o);
+      });
+    }
+  });
+
+  if(!select.value && select.options.length) select.selectedIndex = 0;
+  currentTask = select.value || null;
+}
+
+/** Загружаем описание и стартовый код. resetOutput=true очищает лог. */
+async function loadTask(resetOutput = false){
+  const desc = document.getElementById('taskDesc');
+  const code = document.getElementById('code');
+  const select = document.getElementById('taskSelect');
+  currentTask = select.value;
+  if(!currentTask){ desc.textContent=''; code.value=''; return; }
+  const t = await fetchTask(currentTask);
+  desc.textContent = t.description || '';
+  code.value = t.starter_code || '';
+  if (resetOutput) document.getElementById('output').textContent='';
+}
+
+/** Смена задачи очищает лог, т.к. пользователь явно переключился */
+document.getElementById('taskSelect').addEventListener('change', () => loadTask(true));
+
+/** Запуск тестов — результат не стираем перерисовкой */
+document.getElementById('run').addEventListener('click', async()=>{
+  const code = document.getElementById('code').value;
+  const out = document.getElementById('output');
+  if(!currentTask) return;
+  out.textContent='Запуск...';
+
+  const r = await fetch('/run_code',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({code, task: currentTask})
+  });
+  const data = await r.json();
+
+  if((data.stdout||'').includes('OK')){
+    out.textContent='Тесты пройдены ✅\n'+(data.stdout||'');
+    await fetch('/complete_task',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({username:'user1', task: currentTask})
+    });
+    await render();            // перерисуем статусы тем/список задач
+    // оставляем текущую задачу выбранной; лог НЕ очищаем
+  } else {
+    const details =
+      data.details ||
+      data.stderr ||
+      data.compile_output ||
+      data.message ||
+      data.status ||
+      data.stdout;
+    out.textContent='Провалено ❌\n'+(typeof details==='string'? details : JSON.stringify(details, null, 2));
+  }
+});
+
+/** Подсказка — с дебаунсом, не стираем предыдущий результат тестов */
+document.getElementById('hint').addEventListener('click', async(ev)=>{
+  const btn = ev.currentTarget; if(btn.disabled) return; btn.disabled = true;
+  const out = document.getElementById('output');
+  const code = document.getElementById('code').value;
+  const desc = document.getElementById('taskDesc').textContent;
+
+  const prev = out.textContent;
+  out.textContent = (prev? prev+'\n\n':'') + 'Запрашиваю подсказку...';
+
+  try{
+    const r = await fetch('/api/get-hint',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({code, description: desc})
+    });
+    const data = await r.json();
+    if(data.hint){
+      out.textContent = (prev? prev+'\n\n':'') + 'Подсказка: ' + data.hint + (data.cached?' (из кэша)':'');
+    } else if(data.error==='rate_limited'){
+      out.textContent = (prev? prev+'\n\n':'') + 'Слишком часто. Попробуй чуть позже.';
+    } else {
+      out.textContent = (prev? prev+'\n\n':'') + 'Ошибка: ' + (data.details? JSON.stringify(data.details) : 'неизвестно');
+    }
+  } finally {
+    setTimeout(()=>{ btn.disabled = false; }, 1200);
+  }
+});
+
+/** Инициализация: рендерим список и один раз загружаем текущую задачу с очисткой лога */
+(async () => {
+  await render();
+  if (currentTask) await loadTask(true);
+})();
+</script>
+</body>
+</html>
