@@ -21,18 +21,26 @@ CORS(app)
 # Config / ENV
 # =========================
 # --- Hint providers ---
-HINT_PROVIDER = os.getenv("HINT_PROVIDER", "").lower()  # 'openai' | 'gemini' | 'offline' | '' (auto)
+HINT_PROVIDER = os.getenv(
+    "HINT_PROVIDER", ""
+).lower()  # 'openai' | 'gemini' | 'offline' | '' (auto)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")  # быстрый и бесплатный
+GEMINI_MODEL = os.getenv(
+    "GEMINI_MODEL", "gemini-1.5-flash"
+)  # быстрый и бесплатный
 
 # --- Judge0 (RapidAPI или self-hosted) ---
 JUDGE0_URL = os.getenv("JUDGE0_URL", "https://judge0-ce.p.rapidapi.com")
 JUDGE0_KEY = os.getenv("JUDGE0_KEY", "")
-JUDGE0_HOST_HEADER = os.getenv("JUDGE0_HOST_HEADER", "judge0-ce.p.rapidapi.com")
-JUDGE0_LANGUAGE_ID = int(os.getenv("JUDGE0_LANGUAGE_ID", "71"))  # 71 = Python 3.8+
+JUDGE0_HOST_HEADER = os.getenv(
+    "JUDGE0_HOST_HEADER", "judge0-ce.p.rapidapi.com"
+)
+JUDGE0_LANGUAGE_ID = int(
+    os.getenv("JUDGE0_LANGUAGE_ID", "71")
+)  # 71 = Python 3.8+
 
 DATA_DIR = os.getenv("DATA_DIR", "data")
 USERS_JSON = os.path.join(DATA_DIR, "users.json")
@@ -44,14 +52,9 @@ DEBUG_LOG = os.getenv("DEBUG_LOG", "0") == "1"
 # Ensure data exists
 # =========================
 DEFAULT_TOPICS = {
-    "Python": {
-        "Intro": {"tasks": ["task1"]},
-        "Math": {"tasks": ["task2"]}
-    }
+    "Python": {"Intro": {"tasks": ["task1"]}, "Math": {"tasks": ["task2"]}}
 }
-DEFAULT_USERS = {
-    "user1": {"completed_tasks": []}
-}
+DEFAULT_USERS = {"user1": {"completed_tasks": []}}
 
 os.makedirs(DATA_DIR, exist_ok=True)
 if not os.path.exists(TOPICS_JSON):
@@ -61,20 +64,26 @@ if not os.path.exists(USERS_JSON):
     with open(USERS_JSON, "w", encoding="utf-8") as f:
         json.dump(DEFAULT_USERS, f, ensure_ascii=False, indent=2)
 
+
 def read_json(path: str):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
+
 def write_json(path: str, obj: Any):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
+
 
 # =========================
 # Tasks registry (desc + starter + tests)
 # =========================
 TASKS: Dict[str, Dict[str, str]] = {
     "task1": {
-        "description": "Реализуй функцию my_len(s: str) -> int, которая возвращает длину строки без использования len().",
+        "description": (
+            "Реализуй функцию my_len(s: str) -> int, которая возвращает длину "
+            "строки без использования len()."
+        ),
         "starter_code": """
 # Напиши функцию ниже
 
@@ -92,10 +101,13 @@ if __name__ == "__main__":
     assert my_len("abc") == 3
     assert my_len("привет") == 6
     print("OK")
-""".strip()
+""".strip(),
     },
     "task2": {
-        "description": "Реализуй функцию square(x: int|float) -> int|float, которая возвращает x*x.",
+        "description": (
+            "Реализуй функцию square(x: int|float) -> int|float, которая "
+            "возвращает x*x."
+        ),
         "starter_code": """
 # Напиши функцию ниже
 
@@ -109,7 +121,7 @@ if __name__ == "__main__":
     assert square(-3) == 9
     assert square(1.5) == 2.25
     print("OK")
-""".strip()
+""".strip(),
     },
 }
 
@@ -117,8 +129,9 @@ if __name__ == "__main__":
 # Simple rate limiter + hint cache
 # =========================
 RATE_LIMIT_WINDOW = 10.0  # сек
-RATE_LIMIT_MAX = 3        # не более 3 вызовов за окно
+RATE_LIMIT_MAX = 3  # не более 3 вызовов за окно
 _last_calls: Dict[str, List[float]] = {}
+
 
 def allow_call(key: str) -> bool:
     now = monotonic()
@@ -130,8 +143,11 @@ def allow_call(key: str) -> bool:
     bucket.append(now)
     return True
 
+
 HINT_CACHE_TTL = 60  # сек
-_hint_cache: Dict[str, Dict[str, Any]] = {}  # key -> {"until": ts, "hint": str}
+# key -> {"until": ts, "hint": str}
+_hint_cache: Dict[str, Dict[str, Any]] = {}
+
 
 def get_cached_hint(key: str):
     item = _hint_cache.get(key)
@@ -142,8 +158,10 @@ def get_cached_hint(key: str):
         return None
     return item["hint"]
 
+
 def set_cached_hint(key: str, hint: str):
     _hint_cache[key] = {"until": time.time() + HINT_CACHE_TTL, "hint": hint}
+
 
 # =========================
 # Hint providers
@@ -151,18 +169,24 @@ def set_cached_hint(key: str, hint: str):
 class ProviderError(Exception):
     pass
 
+
 def openai_chat_with_retry(messages, max_retries=5, timeout=30) -> dict:
     if not OPENAI_API_KEY:
         raise ProviderError("OPENAI_API_KEY is not set")
     url = "https://api.openai.com/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json",
+    }
     payload = {"model": OPENAI_MODEL, "messages": messages, "temperature": 0.2}
 
     attempt = 0
     while True:
         attempt += 1
         try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+            resp = requests.post(
+                url, headers=headers, json=payload, timeout=timeout
+            )
             if resp.status_code == 200:
                 return resp.json()
             if resp.status_code in (429, 500, 502, 503, 504):
@@ -179,7 +203,11 @@ def openai_chat_with_retry(messages, max_retries=5, timeout=30) -> dict:
                     base = min(8, 0.5 * (2 ** (attempt - 1)))
                     delay = base + random.uniform(0, 0.333 * base)
                 if DEBUG_LOG:
-                    print(f"[OpenAI] {resp.status_code}, retry in {delay:.2f}s ({attempt}/{max_retries})")
+                    retry_msg = (
+                        f"[OpenAI] {resp.status_code}, retry in {delay:.2f}s "
+                        f"({attempt}/{max_retries})"
+                    )
+                    print(retry_msg)
                 time.sleep(delay)
                 continue
             # другие статусы сразу превращаем в ошибку провайдера
@@ -190,18 +218,25 @@ def openai_chat_with_retry(messages, max_retries=5, timeout=30) -> dict:
             base = min(8, 0.5 * (2 ** (attempt - 1)))
             delay = base + random.uniform(0, 0.333 * base)
             if DEBUG_LOG:
-                print(f"[OpenAI] network error {e}, retry in {delay:.2f}s ({attempt}/{max_retries})")
+                network_msg = (
+                    f"[OpenAI] network error {e}, retry in {delay:.2f}s "
+                    f"({attempt}/{max_retries})"
+                )
+                print(network_msg)
             time.sleep(delay)
+
 
 def _norm_model(name: str) -> str:
     """Убираем префикс 'models/' если пришёл из ListModels."""
     name = (name or "").strip()
     return name[7:] if name.startswith("models/") else name
 
+
 def gemini_generate(prompt: str, timeout=30) -> str:
-    """
-    Надёжный вызов Gemini v1: используем модель из .env и фоллбеки на семейство 2.x.
-    ВАЖНО: URL — только /v1/, без v1beta.
+    """Надёжный вызов Gemini v1.
+
+    Используем модель из .env и фоллбеки на семейство 2.x. Важно: URL —
+    только /v1/, без v1beta.
     """
     if not GEMINI_API_KEY:
         raise ProviderError("GEMINI_API_KEY is not set")
@@ -219,17 +254,22 @@ def gemini_generate(prompt: str, timeout=30) -> str:
         "gemini-2.0-flash-lite-001",
     ]
     # уникализируем
-    seen = set(); models = []
+    seen = set()
+    models = []
     for m in [primary] + fallbacks:
         m = _norm_model(m)
         if m and m not in seen:
-            seen.add(m); models.append(m)
+            seen.add(m)
+            models.append(m)
 
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     last_err = None
 
     for model in models:
-        url = f"https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={GEMINI_API_KEY}"
+        url = (
+            "https://generativelanguage.googleapis.com/v1/models/"
+            f"{model}:generateContent?key={GEMINI_API_KEY}"
+        )
         try:
             resp = requests.post(url, json=payload, timeout=timeout)
             if resp.status_code == 200:
@@ -240,7 +280,8 @@ def gemini_generate(prompt: str, timeout=30) -> str:
                 parts = cands[0].get("content", {}).get("parts") or []
                 if not parts:
                     raise ProviderError(f"No parts ({model})")
-                return (parts[0].get("text") or "").strip()
+                first_part = parts[0].get("text") or ""
+                return first_part.strip()
             last_err = f"{model}: {resp.status_code} {resp.text[:200]}"
             if os.getenv("DEBUG_LOG", "0") == "1":
                 print("[Gemini] FAIL:", last_err)
@@ -252,15 +293,26 @@ def gemini_generate(prompt: str, timeout=30) -> str:
     raise ProviderError(last_err or "Gemini not available")
 
 
-
 @app.route("/diag/gemini/models")
 def diag_gemini_models():
     if not GEMINI_API_KEY:
-        return jsonify({"ok": False, "error": "GEMINI_API_KEY is not set"}), 500
-    url = f"https://generativelanguage.googleapis.com/v1/models?key={GEMINI_API_KEY}"
+        return (
+            jsonify({"ok": False, "error": "GEMINI_API_KEY is not set"}),
+            500,
+        )
+    url = (
+        "https://generativelanguage.googleapis.com/v1/models?key="
+        f"{GEMINI_API_KEY}"
+    )
     try:
         r = requests.get(url, timeout=20)
-        return jsonify({"ok": r.status_code == 200, "status": r.status_code, "body": r.json()})
+        return jsonify(
+            {
+                "ok": r.status_code == 200,
+                "status": r.status_code,
+                "body": r.json(),
+            }
+        )
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -269,15 +321,22 @@ def get_hint_text(description: str, code: str) -> str:
     """Определяет провайдера и выдаёт короткую подсказку."""
     system_msg = {
         "role": "system",
-        "content": "Ты помогаешь студенту. Дай краткую подсказку (1–3 предложения), не раскрывая готового решения."
+        "content": (
+            "Ты помогаешь студенту. Дай краткую подсказку (1–3 предложения), "
+            "не раскрывая готового решения."
+        ),
     }
-    user_msg = {"role": "user", "content": f"Задание: {description}\n\nМой код:\n{code}"}
+    user_msg = {
+        "role": "user",
+        "content": f"Задание: {description}\n\nМой код:\n{code}",
+    }
 
     provider_chain: List[str]
     if HINT_PROVIDER in ("openai", "gemini", "offline"):
         provider_chain = [HINT_PROVIDER]
     else:
-        # авто: сначала OpenAI (если есть ключ), потом Gemini (если есть), потом offline
+        # авто: сначала OpenAI (если есть ключ), потом Gemini (если есть),
+        # потом offline
         provider_chain = []
         if OPENAI_API_KEY:
             provider_chain.append("openai")
@@ -292,11 +351,18 @@ def get_hint_text(description: str, code: str) -> str:
                 data = openai_chat_with_retry([system_msg, user_msg])
                 return data["choices"][0]["message"]["content"].strip()
             elif prov == "gemini":
-                prompt = f"Задание: {description}\n\nМой код:\n{code}\n\nДай подсказку кратко (1–3 предложения), без полного решения."
+                prompt = (
+                    "Задание: {description}\n\nМой код:\n{code}\n\n"
+                    "Дай подсказку кратко (1–3 предложения), "
+                    "без полного решения."
+                ).format(description=description, code=code)
                 return gemini_generate(prompt)
             else:
                 # offline подсказка
-                return "Подсказки офлайн: проверь, что возвращаемое значение соответствует тестам и граничным случаям."
+                return (
+                    "Подсказки офлайн: проверь, что возвращаемое значение "
+                    "соответствует тестам и граничным случаям."
+                )
         except ProviderError as e:
             last_err = str(e)
             if DEBUG_LOG:
@@ -305,6 +371,7 @@ def get_hint_text(description: str, code: str) -> str:
     # если все провалились
     raise RuntimeError(last_err or "No hint provider available")
 
+
 # =========================
 # Judge0 helpers
 # =========================
@@ -312,16 +379,25 @@ def judge0_headers():
     headers = {"Content-Type": "application/json"}
     # RapidAPI mode
     if JUDGE0_KEY and JUDGE0_HOST_HEADER:
-        headers.update({
-            "x-rapidapi-key": JUDGE0_KEY,
-            "x-rapidapi-host": JUDGE0_HOST_HEADER,
-        })
+        headers.update(
+            {
+                "x-rapidapi-key": JUDGE0_KEY,
+                "x-rapidapi-host": JUDGE0_HOST_HEADER,
+            }
+        )
     return headers
 
-def run_in_judge0(source_code: str, stdin: str = "", expected_output: str = None) -> Dict[str, Any]:
+
+def run_in_judge0(
+    source_code: str, stdin: str = "", expected_output: str = None
+) -> Dict[str, Any]:
     """Создаёт сабмишн и ждёт выполнения. При DEBUG_LOG печатает ответ."""
     create_url = f"{JUDGE0_URL}/submissions?base64_encoded=false&wait=true"
-    payload = {"language_id": JUDGE0_LANGUAGE_ID, "source_code": source_code, "stdin": stdin}
+    payload = {
+        "language_id": JUDGE0_LANGUAGE_ID,
+        "source_code": source_code,
+        "stdin": stdin,
+    }
     headers = judge0_headers()
     resp = requests.post(create_url, headers=headers, json=payload, timeout=60)
     if DEBUG_LOG:
@@ -330,12 +406,14 @@ def run_in_judge0(source_code: str, stdin: str = "", expected_output: str = None
     resp.raise_for_status()
     return resp.json()
 
+
 # =========================
 # Routes
 # =========================
 @app.route("/")
 def index_root():
     return render_template("index.html"), 200
+
 
 @app.route("/api/knowledge-web")
 def knowledge_web():
@@ -361,21 +439,44 @@ def knowledge_web():
             first_unlocked_given = True
         else:
             status = "locked"
-        nodes.append({
-            "data": {"id": tname, "label": tname, "status": status, "tasks": topic_tasks}
-        })
+        nodes.append(
+            {
+                "data": {
+                    "id": tname,
+                    "label": tname,
+                    "status": status,
+                    "tasks": topic_tasks,
+                }
+            }
+        )
 
     for i in range(len(topic_names) - 1):
-        edges.append({"data": {"id": f"e{i}", "source": topic_names[i], "target": topic_names[i+1]}})
+        edges.append(
+            {
+                "data": {
+                    "id": f"e{i}",
+                    "source": topic_names[i],
+                    "target": topic_names[i + 1],
+                }
+            }
+        )
 
     return jsonify({"nodes": nodes, "edges": edges, "completed": completed})
+
 
 @app.route("/api/task/<task_name>")
 def get_task(task_name: str):
     task = TASKS.get(task_name)
     if not task:
         return jsonify({"error": "unknown_task"}), 404
-    return jsonify({"task": task_name, "description": task["description"], "starter_code": task["starter_code"]})
+    return jsonify(
+        {
+            "task": task_name,
+            "description": task["description"],
+            "starter_code": task["starter_code"],
+        }
+    )
+
 
 @app.route("/run_code", methods=["POST"])
 def run_code():
@@ -389,19 +490,32 @@ def run_code():
     payload_code = f"{code}\n\n{task['tests']}\n"
     try:
         result = run_in_judge0(payload_code)
-        stdout = (result.get("stdout") or "")
-        stderr = (result.get("stderr") or "")
-        compile_output = (result.get("compile_output") or "")
+        stdout = result.get("stdout") or ""
+        stderr = result.get("stderr") or ""
+        compile_output = result.get("compile_output") or ""
         status = result.get("status", {}).get("description")
-        return jsonify({"stdout": stdout, "stderr": stderr, "compile_output": compile_output, "status": status})
+        return jsonify(
+            {
+                "stdout": stdout,
+                "stderr": stderr,
+                "compile_output": compile_output,
+                "status": status,
+            }
+        )
     except requests.HTTPError as e:
         try:
             err_json = e.response.json()
         except Exception:
             err_json = None
-        return jsonify({"message": "judge0_error", "details": err_json or str(e)}), 200
+        return (
+            jsonify(
+                {"message": "judge0_error", "details": err_json or str(e)}
+            ),
+            200,
+        )
     except Exception as e:
         return jsonify({"message": "server_error", "details": str(e)}), 200
+
 
 @app.route("/complete_task", methods=["POST"])
 def complete_task():
@@ -418,12 +532,22 @@ def complete_task():
         write_json(USERS_JSON, users)
     return jsonify({"ok": True, "completed_tasks": user["completed_tasks"]})
 
+
 @app.route("/api/get-hint", methods=["POST"])
 def api_get_hint():
     # rate limit
     key = request.remote_addr or "anon"
     if not allow_call(key):
-        return jsonify({"hint": None, "error": "rate_limited", "details": "Слишком часто. Попробуй через пару секунд."}), 200
+        return (
+            jsonify(
+                {
+                    "hint": None,
+                    "error": "rate_limited",
+                    "details": "Слишком часто. Попробуй через пару секунд.",
+                }
+            ),
+            200,
+        )
 
     data = request.get_json(force=True)
     code = data.get("code", "")
@@ -440,41 +564,50 @@ def api_get_hint():
         return jsonify({"hint": hint})
     except Exception as e:
         # не ломаем UI: возвращаем текст ошибки в details
-        return jsonify({"hint": None, "error": "hint_error", "details": str(e)}), 200
+        return (
+            jsonify({"hint": None, "error": "hint_error", "details": str(e)}),
+            200,
+        )
+
 
 # Доп: простая диагностика Judge0
 @app.route("/diag/judge0")
 def diag_judge0():
     try:
         res = run_in_judge0("print('OK')")
-        return jsonify({
-            "status": res.get("status", {}),
-            "stdout": res.get("stdout"),
-            "stderr": res.get("stderr"),
-            "compile_output": res.get("compile_output"),
-        })
+        return jsonify(
+            {
+                "status": res.get("status", {}),
+                "stdout": res.get("stdout"),
+                "stderr": res.get("stderr"),
+                "compile_output": res.get("compile_output"),
+            }
+        )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 # Flask и так раздаёт /static, но оставим helper
 @app.route("/static/<path:filename>")
 def serve_static(filename):
     return send_from_directory(app.static_folder, filename)
 
+
 # =========================
 # Entry
 # =========================
 
+
 @app.route("/ping")
 def ping():
     # поможет убедиться, что именно ЭТОТ файл сейчас запущен
-    return jsonify({
-        "ok": True,
-        "provider": (HINT_PROVIDER or "auto"),
-        "cwd": os.getcwd()
-    })
+    return jsonify(
+        {"ok": True, "provider": (HINT_PROVIDER or "auto"), "cwd": os.getcwd()}
+    )
 
-# УСТОЙЧИВЫЙ вызов Gemini — убедись, что функция gemini_generate определена выше!
+
+# УСТОЙЧИВЫЙ вызов Gemini — убедись, что функция gemini_generate
+# определена выше!
 @app.route("/diag/gemini")
 def diag_gemini():
     try:
@@ -483,19 +616,25 @@ def diag_gemini():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+
 # Показать все зарегистрированные маршруты текущего процесса
 @app.route("/routes")
 def routes():
     rules = []
     for r in app.url_map.iter_rules():
-        rules.append({
-            "rule": r.rule,
-            "endpoint": r.endpoint,
-            "methods": sorted([m for m in r.methods if m not in ("HEAD", "OPTIONS")])
-        })
+        rules.append(
+            {
+                "rule": r.rule,
+                "endpoint": r.endpoint,
+                "methods": sorted(
+                    [m for m in r.methods if m not in ("HEAD", "OPTIONS")]
+                ),
+            }
+        )
     # отсортируем по пути для удобства
     rules.sort(key=lambda x: x["rule"])
     return jsonify(rules)
+
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
