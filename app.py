@@ -430,8 +430,12 @@ def knowledge_web():
     for tname in topic_names:
         tdata = topics[tname]
         topic_tasks = []
-        for _, info in tdata.items():
+        for key, info in tdata.items():
+            if key == "theory" or not isinstance(info, dict):
+                continue
             topic_tasks.extend(info.get("tasks", []))
+        topic_theory = tdata.get("theory", "")
+        topic_label = tdata.get("title", tname)
         if topic_tasks and all(task in completed for task in topic_tasks):
             status = "completed"
         elif not first_unlocked_given:
@@ -443,9 +447,10 @@ def knowledge_web():
             {
                 "data": {
                     "id": tname,
-                    "label": tname,
+                    "label": topic_label,
                     "status": status,
                     "tasks": topic_tasks,
+                    "theory": topic_theory,
                 }
             }
         )
@@ -476,6 +481,62 @@ def get_task(task_name: str):
             "starter_code": task["starter_code"],
         }
     )
+
+
+@app.route("/api/topic/<topic_name>")
+def get_topic(topic_name: str):
+    topics = read_json(TOPICS_JSON)
+    topic = topics.get(topic_name)
+    if not topic:
+        return jsonify({"error": "unknown_topic"}), 404
+
+    theory = topic.get("theory", "")
+    tasks: List[str] = []
+    for key, info in topic.items():
+        if key == "theory" or not isinstance(info, dict):
+            continue
+        tasks.extend(info.get("tasks", []))
+
+    return jsonify({"topic": topic_name, "theory": theory, "tasks": tasks})
+
+
+def _topics_to_chapters(topics: Dict[str, Any]) -> List[Dict[str, Any]]:
+    chapters: List[Dict[str, Any]] = []
+    for chapter_name, chapter_data in topics.items():
+        if not isinstance(chapter_data, dict):
+            continue
+        methods: List[Dict[str, Any]] = []
+        for method_name, method_info in chapter_data.items():
+            if method_name == "theory" or not isinstance(method_info, dict):
+                continue
+            methods.append(
+                {
+                    "name": method_name,
+                    "title": method_info.get("title", method_name),
+                    "summary": method_info.get("summary", ""),
+                    "theory": method_info.get("theory", ""),
+                    "tasks": method_info.get("tasks", []),
+                }
+            )
+        chapters.append(
+            {
+                "name": chapter_name,
+                "title": chapter_data.get("title", chapter_name),
+                "theory": chapter_data.get("theory", ""),
+                "methods": methods,
+            }
+        )
+    return chapters
+
+
+@app.route("/api/chapters")
+def get_chapters():
+    topics = read_json(TOPICS_JSON)
+    users = read_json(USERS_JSON)
+    username = request.args.get("user", "user1")
+    completed: List[str] = users.get(username, {}).get("completed_tasks", [])
+    chapters = _topics_to_chapters(topics)
+    return jsonify({"chapters": chapters, "completed": completed})
 
 
 @app.route("/run_code", methods=["POST"])

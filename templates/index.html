@@ -9,157 +9,456 @@
 <body>
   <header>
     <h1>Учебные задания</h1>
-    <p class="muted">Выбирай задачу, пиши код и проверяй тестами. Подсказка не раскрывает решение.</p>
+    <p class="muted">Выбирай главу, изучай теорию по конкретному методу и решай связанные задания в редакторе.</p>
+    <nav id="chapterTabs" class="chapter-tabs"></nav>
   </header>
 
   <main>
-    <section class="grid">
-      <div>
-        <h2>Темы и статус</h2>
-        <div id="nodes" class="stack"></div>
-      </div>
-      <div>
-        <h2>Редактор</h2>
-        <label>Задача:
-          <select id="taskSelect"></select>
-        </label>
-        <pre id="taskDesc" class="desc"></pre>
-        <textarea id="code" placeholder="Вставь или правь стартовый код"></textarea>
-        <div class="row">
-          <button id="run">Запустить тесты</button>
-          <button id="hint">Подсказка</button>
+    <div class="layout">
+      <aside class="panel methods-panel">
+        <div class="panel-header">
+          <h2 id="methodsPanelTitle">Главы</h2>
+          <p id="chapterLead" class="muted small">Выберите главу, чтобы увидеть список методов.</p>
         </div>
-        <pre id="output" class="log"></pre>
-      </div>
-    </section>
+        <div id="methodsList" class="methods-list"></div>
+      </aside>
+
+      <section class="panel method-panel">
+        <div class="method-header">
+          <h2 id="methodTitle">Метод не выбран</h2>
+          <p id="methodSummary" class="small">Выберите метод из списка слева.</p>
+        </div>
+
+        <section class="method-section">
+          <h3>Теория</h3>
+          <div id="methodTheory" class="theory-text muted">После выбора метода здесь появится краткий конспект.</div>
+        </section>
+
+        <section class="method-section">
+          <h3>Задачи</h3>
+          <p id="methodTaskHint" class="muted small">Выберите задачу, чтобы загрузить её описание и стартовый код в редактор.</p>
+          <ul id="methodTasksList" class="method-tasks-list empty">
+            <li class="placeholder">Список задач будет доступен после выбора метода.</li>
+          </ul>
+        </section>
+
+        <section class="method-section editor-section">
+          <h3>Редактор</h3>
+          <p id="taskSelectedLabel" class="muted small">Задача не выбрана.</p>
+          <pre id="taskDesc" class="desc"></pre>
+          <textarea id="code" placeholder="Вставь или правь стартовый код"></textarea>
+          <div class="row">
+            <button id="run">Запустить тесты</button>
+            <button id="hint">Подсказка</button>
+          </div>
+          <pre id="output" class="log"></pre>
+        </section>
+      </section>
+    </div>
   </main>
 
 <script>
-function statusIcon(s){return s==='completed'?'✅':(s==='unlocked'?'🟡':'🔒')}
-
-async function fetchGraph(){
-  const r = await fetch('/api/knowledge-web');
-  if(!r.ok) throw new Error('network');
-  return r.json();
-}
-async function fetchTask(t){
-  const r = await fetch('/api/task/'+encodeURIComponent(t));
+async function fetchTask(taskName){
+  const r = await fetch('/api/task/' + encodeURIComponent(taskName));
   if(!r.ok) throw new Error('unknown task');
   return r.json();
 }
 
-let currentTask = null;
-
-/** Рендерим список тем/задач. Не трогаем #output! */
-async function render(){
-  const g = await fetchGraph();
-  const nodes = document.getElementById('nodes');
-  const select = document.getElementById('taskSelect');
-  nodes.innerHTML = '';
-  select.innerHTML = '';
-
-  g.nodes.forEach(n=>{
-    const d = n.data; const box = document.createElement('div');
-    box.className = 'node ' + (d.status==='locked'?'locked':'');
-    box.innerHTML = `<div class="title">${statusIcon(d.status)} <strong>${d.label}</strong></div>
-                     <div class="tasks">Задачи: ${d.tasks.length? d.tasks.join(', ') : '—'}</div>`;
-    nodes.appendChild(box);
-    if(d.status!=='locked'){
-      d.tasks.forEach(t=>{
-        const o=document.createElement('option'); o.value=t; o.textContent=t + (g.completed.includes(t)?' (done)':'');
-        select.appendChild(o);
-      });
-    }
-  });
-
-  if(!select.value && select.options.length) select.selectedIndex = 0;
-  currentTask = select.value || null;
+async function fetchCatalog(){
+  const r = await fetch('/api/chapters');
+  if(!r.ok) throw new Error('network');
+  return r.json();
 }
 
-/** Загружаем описание и стартовый код. resetOutput=true очищает лог. */
-async function loadTask(resetOutput = false){
+const state = {
+  chapters: [],
+  completed: new Set(),
+  selectedChapter: null,
+  selectedMethod: null,
+  currentTask: null,
+  chapterButtons: new Map(),
+  methodButtons: new Map(),
+  taskButtons: new Map()
+};
+
+function setMutedText(el, text, muted = false){
+  if(!el) return;
+  el.textContent = text;
+  el.classList.toggle('muted', muted);
+}
+
+function getSelectedChapter(){
+  if(!state.selectedChapter) return null;
+  return state.chapters.find(ch => ch.name === state.selectedChapter) || null;
+}
+
+function getSelectedMethod(){
+  const chapter = getSelectedChapter();
+  if(!chapter || !state.selectedMethod) return null;
+  return chapter.methods.find(m => m.name === state.selectedMethod) || null;
+}
+
+function renderChapterTabs(){
+  const nav = document.getElementById('chapterTabs');
+  nav.innerHTML = '';
+  state.chapterButtons.clear();
+  if(!state.chapters.length){
+    const span = document.createElement('span');
+    span.className = 'placeholder';
+    span.textContent = 'Главы не найдены.';
+    nav.appendChild(span);
+    return;
+  }
+  state.chapters.forEach(chapter => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'tab-button';
+    btn.textContent = chapter.title;
+    if(chapter.name === state.selectedChapter){
+      btn.classList.add('active');
+    }
+    btn.addEventListener('click', () => {
+      if(state.selectedChapter === chapter.name) return;
+      selectChapter(chapter.name);
+    });
+    nav.appendChild(btn);
+    state.chapterButtons.set(chapter.name, btn);
+  });
+}
+
+function renderMethodsList(){
+  const container = document.getElementById('methodsList');
+  const lead = document.getElementById('chapterLead');
+  const title = document.getElementById('methodsPanelTitle');
+  container.innerHTML = '';
+  state.methodButtons.clear();
+  const chapter = getSelectedChapter();
+  if(!chapter){
+    title.textContent = 'Главы';
+    setMutedText(lead, 'Выберите главу, чтобы увидеть список методов.', true);
+    const placeholder = document.createElement('div');
+    placeholder.className = 'placeholder';
+    placeholder.textContent = 'Нет выбранной главы.';
+    container.appendChild(placeholder);
+    return;
+  }
+  title.textContent = chapter.title;
+  setMutedText(lead, chapter.theory || 'В этой главе пока нет теории.', !chapter.theory);
+  if(!chapter.methods.length){
+    const placeholder = document.createElement('div');
+    placeholder.className = 'placeholder';
+    placeholder.textContent = 'Для главы пока не добавлены методы.';
+    container.appendChild(placeholder);
+    return;
+  }
+  chapter.methods.forEach(method => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'method-item';
+    const completedCount = method.tasks.filter(t => state.completed.has(t)).length;
+    const total = method.tasks.length;
+    const status = total === 0
+      ? '📘'
+      : completedCount === total
+        ? '✅'
+        : completedCount > 0
+          ? '🟡'
+          : '⬜';
+    button.innerHTML = `
+      <span class="method-status">${status}</span>
+      <span class="method-text">
+        <span class="method-name">${method.title}</span>
+        ${method.summary ? `<span class="method-summary">${method.summary}</span>` : ''}
+      </span>`;
+    if(method.name === state.selectedMethod){
+      button.classList.add('active');
+    }
+    button.addEventListener('click', () => {
+      if(state.selectedMethod === method.name) return;
+      selectMethod(method.name);
+    });
+    container.appendChild(button);
+    state.methodButtons.set(method.name, button);
+  });
+}
+
+function renderTaskList(tasks){
+  const list = document.getElementById('methodTasksList');
+  list.innerHTML = '';
+  state.taskButtons.clear();
+  if(!tasks || !tasks.length){
+    list.classList.add('empty');
+    const li = document.createElement('li');
+    li.className = 'placeholder';
+    li.textContent = 'Для метода пока нет практических заданий.';
+    list.appendChild(li);
+    return;
+  }
+  list.classList.remove('empty');
+  tasks.forEach(taskName => {
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'task-item';
+    const done = state.completed.has(taskName);
+    btn.innerHTML = `
+      <span class="task-status">${done ? '✅' : '⬜'}</span>
+      <span class="task-name">${taskName}</span>`;
+    if(taskName === state.currentTask){
+      btn.classList.add('active');
+    }
+    btn.addEventListener('click', () => {
+      if(state.currentTask === taskName) return;
+      selectTask(taskName, {resetOutput: true});
+    });
+    li.appendChild(btn);
+    list.appendChild(li);
+    state.taskButtons.set(taskName, btn);
+  });
+}
+
+function updateMethodPanel({autoSelectTask = true} = {}){
+  const method = getSelectedMethod();
+  const titleEl = document.getElementById('methodTitle');
+  const summaryEl = document.getElementById('methodSummary');
+  const theoryEl = document.getElementById('methodTheory');
+  const taskHint = document.getElementById('methodTaskHint');
+  if(!method){
+    titleEl.textContent = 'Метод не выбран';
+    setMutedText(summaryEl, 'Выберите метод из списка слева.', true);
+    setMutedText(theoryEl, 'После выбора метода здесь появится краткий конспект.', true);
+    renderTaskList([]);
+    if(autoSelectTask){
+      selectTask(null, {resetOutput: true, suppressFetch: true});
+    }
+    return;
+  }
+  titleEl.textContent = method.title;
+  const summaryText = orDefault(method.summary || '', 'Для метода пока нет краткого описания.');
+  setMutedText(summaryEl, summaryText, !(method.summary && method.summary.trim()));
+  const theoryText = (method.theory || '').trim();
+  setMutedText(
+    theoryEl,
+    theoryText || 'Теория для метода пока не добавлена.',
+    !theoryText
+  );
+  taskHint.classList.toggle('hidden', method.tasks.length === 0);
+  renderTaskList(method.tasks);
+  if(!method.tasks.length){
+    if(autoSelectTask){
+      selectTask(null, {resetOutput: false, suppressFetch: true});
+    }
+    return;
+  }
+  if(!autoSelectTask){
+    highlightSelection();
+    return;
+  }
+  let targetTask = state.currentTask;
+  if(!targetTask || !method.tasks.includes(targetTask)){
+    targetTask = method.tasks.find(task => !state.completed.has(task)) || method.tasks[0];
+  }
+  if(state.currentTask === targetTask){
+    highlightSelection();
+    return;
+  }
+  selectTask(targetTask, {resetOutput: false});
+}
+
+function orDefault(value, fallback){
+  return value && value.trim() ? value : fallback;
+}
+
+function highlightSelection(){
+  state.chapterButtons.forEach((btn, name) => {
+    btn.classList.toggle('active', name === state.selectedChapter);
+  });
+  state.methodButtons.forEach((btn, name) => {
+    btn.classList.toggle('active', name === state.selectedMethod);
+  });
+  state.taskButtons.forEach((btn, name) => {
+    btn.classList.toggle('active', name === state.currentTask);
+  });
+}
+
+async function selectChapter(chapterName){
+  const chapterExists = state.chapters.some(ch => ch.name === chapterName);
+  if(!chapterExists) return;
+  const sameChapter = state.selectedChapter === chapterName;
+  state.selectedChapter = chapterName;
+  state.selectedMethod = sameChapter ? state.selectedMethod : null;
+  renderChapterTabs();
+  renderMethodsList();
+  const chapter = getSelectedChapter();
+  if(!chapter){
+    updateMethodPanel();
+    highlightSelection();
+    return;
+  }
+  if(!chapter.methods.length){
+    state.selectedMethod = null;
+    updateMethodPanel();
+    highlightSelection();
+    return;
+  }
+  if(!state.selectedMethod || !chapter.methods.some(m => m.name === state.selectedMethod)){
+    state.selectedMethod = chapter.methods[0].name;
+  }
+  renderMethodsList();
+  updateMethodPanel();
+  highlightSelection();
+}
+
+function selectMethod(methodName){
+  const chapter = getSelectedChapter();
+  if(!chapter || !chapter.methods.some(m => m.name === methodName)) return;
+  state.selectedMethod = methodName;
+  renderMethodsList();
+  updateMethodPanel();
+  highlightSelection();
+}
+
+async function selectTask(taskName, {resetOutput = false, suppressFetch = false} = {}){
+  state.currentTask = taskName;
+  highlightSelection();
+  const label = document.getElementById('taskSelectedLabel');
   const desc = document.getElementById('taskDesc');
   const code = document.getElementById('code');
-  const select = document.getElementById('taskSelect');
-  currentTask = select.value;
-  if(!currentTask){ desc.textContent=''; code.value=''; return; }
-  const t = await fetchTask(currentTask);
-  desc.textContent = t.description || '';
-  code.value = t.starter_code || '';
-  if (resetOutput) document.getElementById('output').textContent='';
+  if(!taskName){
+    setMutedText(label, 'Задача не выбрана.', true);
+    desc.textContent = '';
+    code.value = '';
+    if(resetOutput){
+      document.getElementById('output').textContent = '';
+    }
+    return;
+  }
+  label.textContent = `Выбрана задача: ${taskName}`;
+  try{
+    if(!suppressFetch){
+      const task = await fetchTask(taskName);
+      desc.textContent = task.description || '';
+      code.value = task.starter_code || '';
+    }
+    if(resetOutput){
+      document.getElementById('output').textContent = '';
+    }
+  }catch(err){
+    desc.textContent = 'Не удалось загрузить описание задачи.';
+    code.value = '';
+  }
 }
 
-/** Смена задачи очищает лог, т.к. пользователь явно переключился */
-document.getElementById('taskSelect').addEventListener('change', () => loadTask(true));
-
-/** Запуск тестов — результат не стираем перерисовкой */
-document.getElementById('run').addEventListener('click', async()=>{
-  const code = document.getElementById('code').value;
-  const out = document.getElementById('output');
-  if(!currentTask) return;
-  out.textContent='Запуск...';
-
-  const r = await fetch('/run_code',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({code, task: currentTask})
-  });
-  const data = await r.json();
-
-  if((data.stdout||'').includes('OK')){
-    out.textContent='Тесты пройдены ✅\n'+(data.stdout||'');
-    await fetch('/complete_task',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({username:'user1', task: currentTask})
-    });
-    await render();            // перерисуем статусы тем/список задач
-    // оставляем текущую задачу выбранной; лог НЕ очищаем
-  } else {
-    const details =
-      data.details ||
-      data.stderr ||
-      data.compile_output ||
-      data.message ||
-      data.status ||
-      data.stdout;
-    out.textContent='Провалено ❌\n'+(typeof details==='string'? details : JSON.stringify(details, null, 2));
+async function loadCatalog(preserveSelection = true){
+  const previousChapter = preserveSelection ? state.selectedChapter : null;
+  const previousMethod = preserveSelection ? state.selectedMethod : null;
+  const previousTask = preserveSelection ? state.currentTask : null;
+  const data = await fetchCatalog();
+  state.chapters = data.chapters || [];
+  state.completed = new Set(data.completed || []);
+  state.chapterButtons.clear();
+  state.methodButtons.clear();
+  state.taskButtons.clear();
+  let targetChapter = previousChapter && state.chapters.some(ch => ch.name === previousChapter)
+    ? previousChapter
+    : (state.chapters[0] ? state.chapters[0].name : null);
+  state.selectedChapter = targetChapter;
+  renderChapterTabs();
+  renderMethodsList();
+  if(!targetChapter){
+    updateMethodPanel();
+    highlightSelection();
+    return;
   }
-});
+  const chapter = getSelectedChapter();
+  if(chapter && chapter.methods.length){
+    let targetMethod = previousMethod && chapter.methods.some(m => m.name === previousMethod)
+      ? previousMethod
+      : chapter.methods[0].name;
+    state.selectedMethod = targetMethod;
+    const method = getSelectedMethod();
+    renderMethodsList();
+    updateMethodPanel({autoSelectTask: false});
+    if(method){
+      let targetTask = previousTask && method.tasks.includes(previousTask)
+        ? previousTask
+        : (method.tasks.find(t => !state.completed.has(t)) || method.tasks[0]);
+      await selectTask(targetTask, {resetOutput: false});
+    }
+  } else {
+    state.selectedMethod = null;
+    updateMethodPanel();
+  }
+  highlightSelection();
+}
 
-/** Подсказка — с дебаунсом, не стираем предыдущий результат тестов */
-document.getElementById('hint').addEventListener('click', async(ev)=>{
-  const btn = ev.currentTarget; if(btn.disabled) return; btn.disabled = true;
-  const out = document.getElementById('output');
-  const code = document.getElementById('code').value;
-  const desc = document.getElementById('taskDesc').textContent;
-
-  const prev = out.textContent;
-  out.textContent = (prev? prev+'\n\n':'') + 'Запрашиваю подсказку...';
-
-  try{
-    const r = await fetch('/api/get-hint',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({code, description: desc})
+function setupActions(){
+  document.getElementById('run').addEventListener('click', async () => {
+    const out = document.getElementById('output');
+    if(!state.currentTask){
+      out.textContent = 'Сначала выберите задачу.';
+      return;
+    }
+    out.textContent = 'Запуск...';
+    const code = document.getElementById('code').value;
+    const r = await fetch('/run_code', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({code, task: state.currentTask})
     });
     const data = await r.json();
-    if(data.hint){
-      out.textContent = (prev? prev+'\n\n':'') + 'Подсказка: ' + data.hint + (data.cached?' (из кэша)':'');
-    } else if(data.error==='rate_limited'){
-      out.textContent = (prev? prev+'\n\n':'') + 'Слишком часто. Попробуй чуть позже.';
+    if((data.stdout || '').includes('OK')){
+      out.textContent = 'Тесты пройдены ✅\n' + (data.stdout || '');
+      await fetch('/complete_task', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({username: 'user1', task: state.currentTask})
+      });
+      await loadCatalog(true);
     } else {
-      out.textContent = (prev? prev+'\n\n':'') + 'Ошибка: ' + (data.details? JSON.stringify(data.details) : 'неизвестно');
+      const details =
+        data.details ||
+        data.stderr ||
+        data.compile_output ||
+        data.message ||
+        data.status ||
+        data.stdout;
+      out.textContent = 'Провалено ❌\n' + (typeof details === 'string' ? details : JSON.stringify(details, null, 2));
     }
-  } finally {
-    setTimeout(()=>{ btn.disabled = false; }, 1200);
-  }
-});
+  });
 
-/** Инициализация: рендерим список и один раз загружаем текущую задачу с очисткой лога */
+  document.getElementById('hint').addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    if(btn.disabled) return;
+    btn.disabled = true;
+    const out = document.getElementById('output');
+    const prev = out.textContent;
+    const code = document.getElementById('code').value;
+    const desc = document.getElementById('taskDesc').textContent;
+    out.textContent = (prev ? prev + '\n\n' : '') + 'Запрашиваю подсказку...';
+    try{
+      const r = await fetch('/api/get-hint', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({code, description: desc})
+      });
+      const data = await r.json();
+      if(data.hint){
+        out.textContent = (prev ? prev + '\n\n' : '') + 'Подсказка: ' + data.hint + (data.cached ? ' (из кэша)' : '');
+      } else if(data.error === 'rate_limited'){
+        out.textContent = (prev ? prev + '\n\n' : '') + 'Слишком часто. Попробуй чуть позже.';
+      } else {
+        out.textContent = (prev ? prev + '\n\n' : '') + 'Ошибка: ' + (data.details ? JSON.stringify(data.details) : 'неизвестно');
+      }
+    } finally {
+      setTimeout(() => { btn.disabled = false; }, 1200);
+    }
+  });
+}
+
 (async () => {
-  await render();
-  if (currentTask) await loadTask(true);
+  setupActions();
+  await loadCatalog(true);
 })();
 </script>
 </body>
